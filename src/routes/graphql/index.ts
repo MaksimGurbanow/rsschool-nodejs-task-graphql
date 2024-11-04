@@ -1,116 +1,49 @@
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
-import { createGqlResponseSchema } from './schemas.js';
-import {
-  graphql,
-  GraphQLObjectType,
-  GraphQLSchema,
-  GraphQLList,
-  GraphQLString,
-} from 'graphql';
-import { UserQueryType } from './user/query.js';
-import { PostQueryType } from './post/query.js';
-import { MemberTypeQueryType } from './member-type/query.js';
-import { ProfileQueryType } from './user/profile/query.js';
-import { UUIDType } from './types/uuid.js';
+import { createGqlResponseSchema, gqlResponseSchema } from './schemas.js';
+import { graphql, GraphQLObjectType, GraphQLSchema, parse, validate } from 'graphql';
+import { UserResolverObject } from './user/resolver.js';
+import { ProfileResolverObject } from './profile/resolver.js';
+import depthLimit from 'graphql-depth-limit';
+import { MemberTypeResolverObject } from './memberType/resolver.js';
+import { initializeDataLoaders } from './dataLoaders.js';
+import { PostResolverObject } from './post/resolver.js';
 
 const RootQuery = new GraphQLObjectType({
   name: 'Query',
   fields: {
-    users: {
-      type: new GraphQLList(UserQueryType),
-      description: 'Fetch all users',
-      resolve: async (_, __, context) => {
-        const { prisma } = context;
-        return prisma.user.findMany();
-      },
-    },
-    user: {
-      type: UserQueryType,
-      description: 'Fetch user by id',
-      args: { id: { type: UUIDType } },
-      resolve: async (_, args, context) => {
-        const { prisma } = context;
-        return prisma.user.findUnique({ where: { id: args.id } });
-      },
-    },
-    posts: {
-      type: new GraphQLList(PostQueryType),
-      description: 'Fetch all posts',
-      resolve: async (_, __, context) => {
-        const { prisma } = context;
-        return prisma.post.findMany();
-      },
-    },
-    post: {
-      type: PostQueryType,
-      description: 'Fetch post by id',
-      args: { id: { type: UUIDType } },
-      resolve: async (_, args, context) => {
-        const { prisma } = context;
-        return prisma.post.findUnique({ where: { id: args.id } });
-      },
-    },
-    memberTypes: {
-      type: new GraphQLList(MemberTypeQueryType),
-      description: 'Fetch all member types',
-      resolve: async (_, __, context) => {
-        const { prisma } = context;
-        return prisma.memberType.findMany();
-      },
-    },
-    memberType: {
-      type: ProfileQueryType,
-      description: 'Fetch profile by id',
-      args: { id: { type: UUIDType } },
-      resolve: async (_, args, context) => {
-        const { prisma } = context;
-        return prisma.memberTye.findUnique({ where: { id: args.id } });
-      },
-    },
-    profiles: {
-      type: new GraphQLList(ProfileQueryType),
-      description: 'Fetch all profiles',
-      resolve: async (_, __, context) => {
-        const { prisma } = context;
-        return prisma.profile.findMany();
-      },
-    },
-    profile: {
-      type: ProfileQueryType,
-      description: 'Fetch profile by id',
-      args: { id: { type: UUIDType } },
-      resolve: async (_, args, context) => {
-        const { prisma } = context;
-        return prisma.profile.findUnique({ where: { id: args.id } });
-      },
-    },
+    ...UserResolverObject,
+    ...ProfileResolverObject,
+    ...MemberTypeResolverObject,
+    ...PostResolverObject,
   },
 });
 const schema = new GraphQLSchema({ query: RootQuery });
 const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
-  const { prisma } = fastify;
 
   fastify.route({
     url: '/',
     method: 'POST',
     schema: {
       ...createGqlResponseSchema,
-      response: {},
+      response: {
+        200: gqlResponseSchema,
+      },
     },
     async handler(req) {
-      try {
-        const result = await graphql({
-          schema,
-          source: req.body.query,
-          variableValues: req.body.variables,
-          contextValue: { prisma },
-        });
+      const { query, variables } = req.body;
 
-        return result;
-      } catch (error) {
-        console.error(error);
-        return { errors: [error] };
+      const depthFiveDepthError = validate(schema, parse(query), [depthLimit(5)]);
+
+      if (depthFiveDepthError.length) {
+        return { data: null, errors: depthFiveDepthError };
       }
+      const { prisma } = fastify;
+      return await graphql({
+        schema,
+        source: query,
+        variableValues: variables,
+        contextValue: { prisma, ...initializeDataLoaders(prisma) },
+      });
     },
   });
 };
