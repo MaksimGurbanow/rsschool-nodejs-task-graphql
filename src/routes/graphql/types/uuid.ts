@@ -29,3 +29,28 @@ export const UUIDType = new GraphQLScalarType({
     return undefined;
   },
 });
+
+export const UUIDOrStringType = new GraphQLScalarType({
+  name: 'UUIDOrString',
+  description: 'A field that can be either a valid UUID or a string',
+  serialize(value) {
+    if (!isUUID(value) && typeof value !== 'string') {
+      throw new TypeError(`Value must be a valid UUID or a string.`);
+    }
+    return value;
+  },
+  parseValue(value) {
+    if (!isUUID(value) && typeof value !== 'string') {
+      throw new TypeError(`Value must be a valid UUID or a string.`);
+    }
+    return value;
+  },
+  parseLiteral(ast) {
+    if (ast.kind === Kind.STRING) {
+      if (isUUID(ast.value) || ast.value) {
+        return ast.value;
+      }
+    }
+    throw new TypeError(`Value must be a valid UUID or a string.`);
+  },
+});
